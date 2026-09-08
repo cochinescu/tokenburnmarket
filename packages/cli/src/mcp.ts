@@ -109,6 +109,7 @@ function quoteLines(answer: Extract<TradeAnswer, { placed: false }>): string[] {
 
 export interface McpDependencies {
   /** Read at call time, not at startup, so connecting in another terminal takes effect. */
+  signal?: AbortSignal;
   loadConfig?: () => DeviceConfig | null;
   /** Injected in tests. Given a config, answers the four /api/me routes. */
   client?: (config: DeviceConfig) => ApiClient;
@@ -123,14 +124,19 @@ export interface McpDependencies {
 /** The server, wired but not connected to a transport. Exported so tests can drive it. */
 export function createMcpServer(dependencies: McpDependencies = {}): McpServer {
   const loadConfig = dependencies.loadConfig ?? (() => readConfig(currentConfigPath()));
-  const clientFor = dependencies.client ?? ((config: DeviceConfig) => new ApiClient(config));
+  const clientFor = dependencies.client ?? ((config: DeviceConfig) => new ApiClient(config, (url, init) => {
+    const signals = [AbortSignal.timeout(60_000)];
+    if (dependencies.signal) signals.push(dependencies.signal);
+    if (init?.signal) signals.push(init.signal);
+    return fetch(url, { ...init, signal: AbortSignal.any(signals) });
+  }));
   const runSync =
     dependencies.runSync ??
     ((config: DeviceConfig, log: (line: string) => void, options?: AutoSyncOptions) =>
-      sync({ configPath: currentConfigPath(), log, ...options }));
+      sync({ configPath: currentConfigPath(), log, ...options, signal: dependencies.signal }));
 
   const server = new McpServer(
-    { name: "tokenburnmarket", version: "0.2.4" },
+    { name: "tokenburnmarket", version: "0.2.5" },
     { capabilities: { tools: {} } },
   );
 
@@ -291,11 +297,42 @@ export function createMcpServer(dependencies: McpDependencies = {}): McpServer {
 
 /** Start the server on stdio and stay up until the client disconnects. */
 export async function runMcpServer(dependencies: McpDependencies = {}): Promise<number> {
-  const server = createMcpServer(dependencies);
-  await server.connect(new StdioServerTransport());
-  // The transport owns the process from here: stdin closing ends it.
-  await new Promise<void>((resolve) => {
-    server.server.onclose = () => resolve();
-  });
+  const controller = new AbortController();
+  const server = createMcpServer({ ...dependencies, signal: controller.signal });
+  let finish!: () => void;
+  const closed = new Promise<void>((resolve) => { finish = resolve; });
+  let stopping = false;
+  const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    controller.abort();
+    void server.close().then(finish, finish);
+  };
+  server.server.onclose = stop;
+  process.stdin.once("end", stop);
+  process.stdin.once("close", stop);
+  process.stdin.once("error", stop);
+  process.stdout.once("error", stop);
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  // Some hosts leave inherited pipes open when they die.
+  const parent = process.ppid;
+  const watchdog = setInterval(() => {
+    if (process.ppid !== parent || process.ppid === 1) stop();
+  }, 1000);
+  try {
+    await server.connect(new StdioServerTransport());
+    if (process.stdin.readableEnded || process.stdin.destroyed) stop();
+    await closed;
+  } finally {
+    controller.abort();
+    clearInterval(watchdog);
+    process.stdin.removeListener("end", stop);
+    process.stdin.removeListener("close", stop);
+    process.stdin.removeListener("error", stop);
+    process.stdout.removeListener("error", stop);
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
+  }
   return 0;
 }

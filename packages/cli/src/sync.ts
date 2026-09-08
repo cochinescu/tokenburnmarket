@@ -16,6 +16,7 @@ import { readUsageAggregates } from "./ccusage.js";
 import { buildSyncDays, windowStart } from "./collect.js";
 import { currentConfigPath, readConfig, writeConfig } from "./config.js";
 import { readReceiptStreams } from "./receipts.js";
+import { acquireSyncLock } from "./sync-lock.js";
 
 /** One row of the server's answer, or of the local preview a dry run prints. */
 interface DayOutcome {
@@ -33,6 +34,7 @@ interface SyncResponse {
 
 export interface SyncOptions {
   configPath?: string;
+  signal?: AbortSignal;
   /** `--since N`: collect the last N days instead of the days since the watermark. */
   sinceDays?: number;
   dryRun?: boolean;
@@ -157,10 +159,12 @@ async function upload(
   payload: SyncPayload,
   privateKey: string,
   fetchImpl: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<SyncResponse> {
   const signed = await createSignedSync(privateKey, payload);
   const response = await fetchImpl(`${serverUrl}/api/sync`, {
     method: "POST",
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${deviceToken}`,
@@ -175,6 +179,21 @@ async function upload(
 }
 
 export async function sync(options: SyncOptions = {}): Promise<number> {
+  const configPath = options.configPath ?? currentConfigPath();
+  const lock = acquireSyncLock(`${configPath}.sync-lock`);
+  if (!lock) {
+    (options.log ?? console.log)("Another usage sync is already running. Skipping this sync.");
+    return 0;
+  }
+  try {
+    options.signal?.throwIfAborted();
+    return await syncLocked({ ...options, configPath });
+  } finally {
+    lock.release();
+  }
+}
+
+async function syncLocked(options: SyncOptions): Promise<number> {
   const log = options.log ?? ((line: string) => console.log(line));
   const now = (options.now ?? (() => new Date()))();
   const env = options.env ?? process.env;
@@ -208,7 +227,8 @@ export async function sync(options: SyncOptions = {}): Promise<number> {
       ? `Reading usage since ${start}.`
       : "Reading all usage on this machine. This takes a moment the first time.",
   );
-  const aggregates = await readUsage({ since: start, env });
+  const aggregates = await readUsage({ since: start, env, signal: options.signal });
+  options.signal?.throwIfAborted();
   const receipts = readReceiptStreams(env, home, start);
   const days = buildSyncDays(aggregates, receipts, { now, start });
 
@@ -265,12 +285,14 @@ export async function sync(options: SyncOptions = {}): Promise<number> {
   const outcomes: DayOutcome[] = [];
   let watermark = config.lastSyncedDay ?? null;
   for (const payload of payloads) {
+    options.signal?.throwIfAborted();
     const result = await upload(
       config.serverUrl,
       config.deviceToken,
       payload,
       config.privateKey,
       fetchImpl,
+      options.signal,
     );
     outcomes.push(...result.days);
     watermark = result.nextWatermark ?? watermark;

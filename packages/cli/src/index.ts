@@ -126,6 +126,13 @@ async function main(): Promise<number> {
   }
 }
 
+// Convert normal termination into an exit event so owned collector trees are
+// removed for one-shot commands too. MCP and daemon provide their own shutdown.
+if (!["mcp", "daemon"].includes(process.argv[2] ?? "")) {
+  process.once("SIGINT", () => process.exit(130));
+  process.once("SIGTERM", () => process.exit(143));
+}
+
 main()
   .then((code) => {
     process.exitCode = code;

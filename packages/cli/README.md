@@ -110,3 +110,11 @@ npm publish
 `package.json` before, and `npm pack --dry-run` prints what would ship.
 
 MIT licensed.
+
+### Process lifecycle
+
+MCP servers stop when the client closes stdin or their parent exits, cancelling
+active collection. Each ccusage command has a five-minute limit; shutdown and
+timeout terminate its process tree. Sync uploads time out after one minute.
+MCP startup, manual sync, and the daemon share a per-config lock, so only one
+usage scan runs at a time. Locks left by exited processes recover automatically.

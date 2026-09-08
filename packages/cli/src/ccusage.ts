@@ -11,10 +11,7 @@
   internals are not, and `npx` keeps the Collector's own install small. Point
   TBM_CCUSAGE at a local install to skip the download.
 */
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
+import { runCollector } from "./collector-process.js";
 
 /** One (day, provider, model) aggregate, before receipts are attached. */
 export interface UsageAggregate {
@@ -134,17 +131,14 @@ export interface CcusageOptions {
   /** Oldest UTC day to ask for, `YYYY-MM-DD`. Omitted means everything on this machine. */
   since?: string;
   env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
   /** Injected in tests. Real runs spawn ccusage. */
   exec?: (args: string[]) => Promise<string>;
 }
 
-async function spawnCcusage(env: NodeJS.ProcessEnv, args: string[]): Promise<string> {
+async function spawnCcusage(env: NodeJS.ProcessEnv, args: string[], signal?: AbortSignal): Promise<string> {
   const [command, ...base] = ccusageCommand(env);
-  const { stdout } = await run(command!, [...base, ...args], {
-    env,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return stdout;
+  return runCollector(command!, [...base, ...args], env, signal);
 }
 
 /**
@@ -158,7 +152,7 @@ export async function readUsageAggregates(
   options: CcusageOptions = {},
 ): Promise<UsageAggregate[]> {
   const env = options.env ?? process.env;
-  const exec = options.exec ?? ((args: string[]) => spawnCcusage(env, args));
+  const exec = options.exec ?? ((args: string[]) => spawnCcusage(env, args, options.signal));
   const window = options.since ? ["--since", options.since.replace(/-/g, "")] : [];
   const common = ["--json", "--timezone", "UTC", ...window];
 
@@ -170,6 +164,7 @@ export async function readUsageAggregates(
   try {
     reasoning = parseCodexReasoning(JSON.parse(await exec(["codex", "daily", ...common])));
   } catch {
+    options.signal?.throwIfAborted();
     reasoning = new Map();
   }
 
