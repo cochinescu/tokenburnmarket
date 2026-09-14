@@ -19,6 +19,7 @@ export type PlausibilityCode =
   | "cache_ratio"
   | "daily_cost_ceiling"
   | "receipt_stream_incoherent"
+  | "receipt_stream_thin"
   | "no_receipt_stream";
 
 export interface PlausibilityReason {
@@ -265,6 +266,13 @@ export function checkPlausibility(
     });
   }
 
+  // The two directions are not symmetric. More tokens than the receipts can
+  // carry inflates a ranked quantity, so it still quarantines. Surplus
+  // receipts do not: Leaderboards rank cost and tokens, so extra receipts buy
+  // nothing but the Verified badge. Dropping that row to Reported takes the
+  // badge away, which is the whole of the advantage, without voiding a real
+  // Builder's day.
+  const distrust: PlausibilityReason[] = [];
   if (row.receiptCount > 0) {
     const perReceipt = producedTokens / row.receiptCount;
     if (perReceipt > limits.maxOutputTokensPerReceipt) {
@@ -275,16 +283,23 @@ export function checkPlausibility(
         limit: limits.maxOutputTokensPerReceipt,
       });
     } else if (producedTokens > 0 && perReceipt < limits.minOutputTokensPerReceipt) {
-      reasons.push({
-        code: "receipt_stream_incoherent",
-        message: "More receipts than the output tokens can account for.",
+      distrust.push({
+        code: "receipt_stream_thin",
+        message:
+          "More receipts than the output tokens can account for, so the stream is not counted as evidence.",
         observed: perReceipt,
         limit: limits.minOutputTokensPerReceipt,
       });
     }
   }
 
-  if (reasons.length > 0) return { trustLevel: "quarantined", reasons };
+  // A quarantine outranks the downgrade, but the thin-stream reason still
+  // belongs in the admin queue's explanation of the row.
+  if (reasons.length > 0) {
+    return { trustLevel: "quarantined", reasons: [...reasons, ...distrust] };
+  }
+
+  if (distrust.length > 0) return { trustLevel: "reported", reasons: distrust };
 
   if (row.receiptCount === 0) {
     return {

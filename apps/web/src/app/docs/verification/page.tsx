@@ -54,9 +54,10 @@ export default function DocsVerificationPage() {
         <li className="bg-surface px-5 py-4">
           <Badge tone="reported">reported</Badge>
           <p className="mt-2 text-[0.95rem] text-muted">
-            Signed by a bound device, no receipt stream. Agents whose transcripts have no
-            per-message identifiers we can read land here. It counts on leaderboards with the badge
-            attached, and mints at half.
+            Signed by a bound device, no receipt stream we can lean on. Agents whose transcripts
+            have no per-message identifiers we can read land here, and so does a day carrying more
+            receipts than its tokens account for. It counts on leaderboards with the badge attached,
+            and mints at half.
           </p>
         </li>
         <li className="bg-surface px-5 py-4">
@@ -85,7 +86,10 @@ export default function DocsVerificationPage() {
         </li>
         <li>
           Coherence. The number of receipts and the tokens attributed to them have to fit each
-          other. A day with enormous totals and a handful of receipts does not.
+          other. A day with enormous totals and a handful of receipts does not, and is quarantined.
+          Surplus receipts are the harmless direction — more receipts than the tokens account for
+          moves no ranking, since boards rank cost and tokens — so that row drops to reported
+          instead of taking the day down with it.
         </li>
       </ul>
 

@@ -5,7 +5,9 @@
  *
  * - `verified`: signed Device, Receipt Stream present, checks passed.
  *   Product copy: "verified means signed and plausible, not proven".
- * - `reported`: signed Device, no Receipt Stream. Mints at a discount, badged.
+ * - `reported`: signed Device, no Receipt Stream we can lean on — either none
+ *   at all, or one carrying more receipts than its tokens account for. Mints
+ *   at a discount, badged.
  * - `quarantined`: failed a check. Out of Leaderboards, mint, and resolution.
  */
 export type TrustLevel = "verified" | "reported" | "quarantined";
