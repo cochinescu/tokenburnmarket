@@ -2,7 +2,7 @@
 //
 // Usage comes from user-owned transcript files, so it cannot be proven. These
 // checks make fabrication costly and detectable: a row that clears them and
-// carries a Receipt Stream is Verified, one without a stream is Reported, and
+// carries a coherent Receipt Stream is Verified, one without usable evidence is Reported, and
 // one that trips any ceiling is Quarantined with the reasons attached.
 //
 // Every ceiling is configurable. Defaults are deliberately loose: a false

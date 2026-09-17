@@ -178,6 +178,45 @@ describe("applySync", () => {
     expect(store.builderDays.get(`${BUILDER}|${DAY}`)?.trustLevelMin).toBe("quarantined");
   });
 
+  it("keeps a mixed day counted when one model has a thin stream, including re-syncs", async () => {
+    const store = memoryStore();
+    const days = [
+      day({ costUsd: 415.37 }),
+      day({ model: "claude-fable-5-1", outputTokens: 4, costUsd: 0.83, receipts: stream(682, "b") }),
+    ];
+    for (const watermark of [null, DAY]) {
+      const result = await applySync(store, device(DEVICE_A, watermark), payload(DEVICE_A, days), NOW);
+      expect(result.days.map((row) => row.trustLevel)).toEqual(["verified", "reported"]);
+      expect(result.days[1]?.reasons.map((reason) => reason.code)).toEqual(["receipt_stream_thin"]);
+      expect(result.nextWatermark).toBe(DAY);
+      expect(store.builderDays.get(`${BUILDER}|${DAY}`)).toMatchObject({
+        costUsd: 416.2,
+        totalTokens: 451_004,
+        trustLevelMin: "reported",
+      });
+      expect(store.usage.get(`${DEVICE_A}|${DAY}|claude|claude-fable-5-1`)).toMatchObject({
+        trustLevel: "reported",
+        quarantineReasons: [expect.objectContaining({ code: "receipt_stream_thin" })],
+      });
+    }
+  });
+
+  it("still quarantines the whole day when a thin stream also exceeds a ceiling", async () => {
+    const store = memoryStore();
+    const result = await applySync(
+      store,
+      device(DEVICE_A),
+      payload(DEVICE_A, [day({ outputTokens: 4, costUsd: 9000, receipts: stream(682) })]),
+      NOW,
+    );
+    expect(result.days[0]?.trustLevel).toBe("quarantined");
+    expect(result.days[0]?.reasons.map((reason) => reason.code)).toEqual([
+      "daily_cost_ceiling", "receipt_stream_thin",
+    ]);
+    expect(result.nextWatermark).toBeNull();
+    expect(store.builderDays.get(`${BUILDER}|${DAY}`)?.trustLevelMin).toBe("quarantined");
+  });
+
   it("reports a day with no Receipt Stream", async () => {
     const store = memoryStore();
     const result = await applySync(

@@ -131,6 +131,25 @@ describe("checkPlausibility", () => {
     expect(result.reasons.map((r) => r.code)).toEqual(["receipt_stream_thin"]);
   });
 
+  it("accepts the exact minimum and includes reasoning tokens in receipt evidence", () => {
+    const result = checkPlausibility(
+      ordinaryDay({ outputTokens: 4, reasoningTokens: 678, receiptCount: 682 }),
+      { now: NOW },
+    );
+    expect(result).toEqual({ trustLevel: "verified", reasons: [] });
+  });
+
+  it("uses the configured minimum for thin streams", () => {
+    const result = checkPlausibility(
+      ordinaryDay({ outputTokens: 1000, receiptCount: 1000 }),
+      { now: NOW, limits: { minOutputTokensPerReceipt: 2 } },
+    );
+    expect(result.trustLevel).toBe("reported");
+    expect(result.reasons).toEqual([
+      expect.objectContaining({ code: "receipt_stream_thin", observed: 1, limit: 2 }),
+    ]);
+  });
+
   it("takes ceilings from the caller", () => {
     const row = ordinaryDay({ costUsd: 500 });
     expect(codes(row)).toEqual([]);
